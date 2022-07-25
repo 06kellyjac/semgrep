@@ -18,7 +18,7 @@
         "dataflow_trace": {
           "intermediate_vars": [
             {
-              "abstract_content": "a",
+              "content": "a",
               "location": {
                 "end": {
                   "col": 6,
@@ -34,7 +34,7 @@
               }
             },
             {
-              "abstract_content": "b",
+              "content": "b",
               "location": {
                 "end": {
                   "col": 10,
@@ -51,7 +51,7 @@
             }
           ],
           "taint_source": {
-            "abstract_content": "source1()",
+            "content": "source1()",
             "location": {
               "end": {
                 "col": 18,
