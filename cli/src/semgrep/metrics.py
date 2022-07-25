@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import uuid
+from collections import Counter
 from datetime import datetime
 from enum import auto
 from enum import Enum
@@ -100,6 +101,7 @@ class ValueSchema(ValueRequiredSchema, total=False):
     numFindings: int
     numIgnored: int
     ruleHashesWithFindings: Dict[str, int]
+    unsupportedExts: Dict[str, int]
 
 
 class FixRateSchema(TypedDict, total=False):
@@ -296,6 +298,12 @@ class Metrics:
         total_bytes_scanned = sum(t.stat().st_size for t in targets)
         self.payload["performance"]["totalBytesScanned"] = total_bytes_scanned
         self.payload["performance"]["numTargets"] = len(targets)
+
+    @suppress_errors
+    def add_ignores(self, ignored: Set[Path]) -> None:
+        ignored_ext_freqs = Counter([os.path.splitext(path)[1] for path in ignored])
+        ignored_ext_freqs.pop("", None)  # don't count files with no extension
+        self.payload["value"]["unsupportedExts"] = ignored_ext_freqs
 
     @suppress_errors
     def add_errors(self, errors: List[SemgrepError]) -> None:
