@@ -130,6 +130,14 @@ class FileTargetingLog:
             }
         )
 
+    @property
+    def unsupported_lang_paths(self):
+        # paths of all files that were ignored by ALL non-generic langs
+        return set.intersection(*[
+            paths for lang, paths in self.by_language.items()
+            if lang != "generic"
+        ]) if self.by_language else set()
+
     def __str__(self) -> str:
         limited_fragments = []
         skip_fragments = []
