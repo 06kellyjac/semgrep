@@ -16,6 +16,7 @@ Findings:
 
          ▶▶┆ Autofix ▶ bar == 2
           1┆ bar == 2
+sending 'complete' blob {'exit_code': 0, 'stats': {'findings': 1, 'errors': [], 'total_time': 0.2015209197998047, 'unsupported_exts': Counter()}}
 
 === end of stdout - plain
 
@@ -231,6 +232,7 @@ Sending complete blob: {
         "findings": 1,
         "errors": [],
         "total_time":<MASKED>
+        "unsupported_exts": {}
     }
 }
   No blocking findings so exiting with code 0
