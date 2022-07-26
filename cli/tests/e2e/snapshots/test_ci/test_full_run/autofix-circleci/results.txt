@@ -32,7 +32,6 @@ Findings:
         useless comparison to 4
 
          19┆ baz == 4
-sending 'complete' blob {'exit_code': 1, 'stats': {'findings': 9, 'errors': [], 'total_time': 0.205092191696167, 'unsupported_exts': Counter()}}
 
 === end of stdout - plain
 

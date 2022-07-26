@@ -223,8 +223,6 @@ SEMGREP_APP_TOKEN="fake_key" SEMGREP_USER_AGENT_APPEND="pytest" SEMGREP_SETTINGS
     }
   ]
 }
-sending 'complete' blob {'exit_code': 1, 'stats': {'findings': 9, 'errors': [], 'total_time': 0.19663190841674805, 'unsupported_exts': Counter()}}
-
 === end of stdout - plain
 
 === stderr - plain
