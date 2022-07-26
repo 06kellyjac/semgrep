@@ -24,6 +24,7 @@ Findings:
 
          ▶▶┆ Autofix ▶ foo == 2
           2┆ foo == 2
+sending 'complete' blob {'exit_code': 0, 'stats': {'findings': 2, 'errors': [], 'total_time': 0.4192373752593994, 'unsupported_exts': Counter()}}
 
 === end of stdout - plain
 
