@@ -1,0 +1,5 @@
+Add experimental support for _taint labels_, that is the ability to attach labels to
+different kinds of taint. This allows to write more complex taint rules that
+previously required ugly workarounds. Taint labels also allows us to write certain
+classes of typestate analyses (e.g., check that a file description is not used after
+being closed).
