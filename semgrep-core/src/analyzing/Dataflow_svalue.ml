@@ -29,7 +29,7 @@ let logger = Logging.get_logger [ __MODULE__ ]
 (* map for each node/var whether a variable is constant *)
 type mapping = G.svalue Dataflow_core.mapping
 
-module DataflowX = Dataflow_core.Make (struct
+module DataflowX = Dataflow_prog.Make (struct
   type node = F.node
   type edge = F.edge
   type flow = (node, edge) CFG.t
@@ -430,7 +430,7 @@ let union_env =
       let* c2 = c2_opt in
       Some (union c1 c2))
 
-let input_env ~enter_env ~(flow : F.cfg) mapping ni =
+let input_env enter_env (flow : F.cfg) mapping ni _config =
   let node = flow.graph#nodes#assoc ni in
   match node.F.n with
   | Enter -> enter_env
@@ -468,15 +468,15 @@ let update_env_with env var sval =
 
 let transfer :
     lang:Lang.t ->
-    enter_env:G.svalue Dataflow_core.env ->
     flow:F.cfg ->
+    'a Dataflow_core.env ->
     G.svalue Dataflow_core.transfn =
- fun ~lang ~enter_env ~flow
+ fun ~lang ~flow
      (* the transfer function to update the mapping at node index ni *)
-       mapping ni ->
+       env _mapping ni ->
   let node = flow.graph#nodes#assoc ni in
 
-  let inp' = input_env ~enter_env ~flow mapping ni in
+  let inp' = env in
 
   let out' =
     match node.F.n with
@@ -490,6 +490,9 @@ let transfer :
     | NReturn _
     | NThrow _
     | NOther _
+    | NFunc _
+    | NClass _
+    | NModule _
     | NTodo _ ->
         inp'
     | NInstr instr -> (
@@ -506,8 +509,8 @@ let transfer :
             else
               (* symbolic propagation *)
               (* Call to an arbitrary function, we are intraprocedural so we cannot
-               * propagate actual constants in this case, but we can propagate the
-               * call itself as a symbolic expression. *)
+                 * propagate actual constants in this case, but we can propagate the
+                 * call itself as a symbolic expression. *)
               let ccall = sym_prop instr.iorig in
               update_env_with inp' var ccall
         | CallSpecial
@@ -518,12 +521,12 @@ let transfer :
         | Call (None, { e = Fetch { base = Var var; offset = Dot _; _ }; _ }, _)
           ->
             (* Method call `var.f(args)` that returns void, we conservatively
-             * assume that it may be updating `var`; e.g. in Ruby strings are
-             * mutable. *)
+               * assume that it may be updating `var`; e.g. in Ruby strings are
+               * mutable. *)
             D.VarMap.remove (str_of_name var) inp'
         | ___else___ -> (
             (* In any other case, assume non-constant.
-             * This covers e.g. `x.f = E`, `x[E1] = E2`, `*x = E`, etc. *)
+               * This covers e.g. `x.f = E`, `x[E1] = E2`, `*x = E`, etc. *)
             let lvar_opt = LV.lvar_of_instr_opt instr in
             match lvar_opt with
             | None -> inp'
@@ -536,15 +539,21 @@ let transfer :
 (* Entry point *)
 (*****************************************************************************)
 
-let (fixpoint : Lang.t -> IL.name list -> F.cfg -> mapping) =
+let rec (fixpoint : Lang.t -> IL.name list -> F.cfg -> mapping) =
  fun lang _inputs flow ->
   let enter_env = D.VarMap.empty in
-  DataflowX.fixpoint ~eq
+  DataflowX.fixpoint ~enter_env ~eq
     ~init:(DataflowX.new_node_array flow (Dataflow_core.empty_inout ()))
-    ~trans:(transfer ~lang ~enter_env ~flow) (* svalue is a forward analysis! *)
-    ~forward:true ~flow
+    ~trans:(fun _name flow env -> transfer ~lang ~flow env)
+      (* svalue is a forward analysis! *)
+    ~forward:true ~flow ~meet:input_env
+    ~modify_env:(fun env node _ ->
+      match node.n with
+      | NFunc _ -> VarMap.empty
+      | _ -> env)
+    ~config:() ~name:None ~conclude:update_svalue
 
-let update_svalue (flow : F.cfg) mapping =
+and update_svalue (flow : F.cfg) mapping =
   let for_all_id_info : (G.id_info -> bool) -> G.any -> bool =
     (* Check that all id_info's satisfy a given condition. We use refs so that
      * we can have a single visitor for all calls, given that `mk_visitor` is
@@ -596,7 +605,7 @@ let update_svalue (flow : F.cfg) mapping =
          let node = flow.graph#nodes#assoc ni in
 
          (* Update RHS svalue according to the input env. *)
-         LV.rlvals_of_node node.n
+         LV.rlvals_of_node_kind node.n
          |> List.iter (function
               | { base = Var var; _ } -> (
                   match

@@ -98,12 +98,15 @@ let lvar_of_instr_opt x =
   | Mem _ ->
       None
 
-let rlvals_of_node = function
+let rlvals_of_node_kind = function
   | Enter
   | Exit
   | TrueNode
   | FalseNode
   | NGoto _
+  | NFunc _
+  | NClass _
+  | NModule _
   | Join ->
       []
   | NInstr x -> rlvals_of_instr x

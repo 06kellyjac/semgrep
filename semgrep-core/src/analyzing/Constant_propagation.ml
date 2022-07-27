@@ -672,18 +672,9 @@ let propagate_dataflow lang ast =
       let xs =
         AST_to_IL.stmt lang (G.Block (Parse_info.unsafe_fake_bracket ast) |> G.s)
       in
-      let flow = CFG_build.cfg_of_stmts xs in
+      let flow = CFG_build.cfg_of_stmts lang xs in
       propagate_dataflow_one_function lang [] flow
   | _ ->
-      let v =
-        V.mk_visitor
-          {
-            V.default_visitor with
-            V.kfunction_definition =
-              (fun (_k, _) def ->
-                let inputs, xs = AST_to_IL.function_definition lang def in
-                let flow = CFG_build.cfg_of_stmts xs in
-                propagate_dataflow_one_function lang inputs flow);
-          }
-      in
-      v (Pr ast)
+      let xs = AST_to_IL.stmt lang (G.stmt1 ast) in
+      let flow = CFG_build.cfg_of_stmts lang xs in
+      propagate_dataflow_one_function lang [] flow

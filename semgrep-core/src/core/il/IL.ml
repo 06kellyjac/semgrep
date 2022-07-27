@@ -275,7 +275,7 @@ and call_special =
    | StringAccess of string (* for records/hashes *)
 *)
 and anonymous_entity =
-  | Lambda of function_definition
+  | Lambda of G.function_definition * function_definition
   | AnonClass of G.class_definition
 
 (*****************************************************************************)
@@ -302,6 +302,13 @@ and stmt_kind =
       * (name * stmt list) list (* catches *)
       * stmt list (* finally *)
   | Throw of tok * exp (* less: enforce lval here? *)
+  | FuncStmt of {
+      fdef : G.function_definition;
+      ent : G.entity;
+      body : stmt list;
+    }
+  | ClassStmt of stmt list
+  | ModuleStmt of stmt list
   | MiscStmt of other_stmt
   | FixmeStmt of fixme_kind * G.any
 
@@ -329,6 +336,11 @@ and function_definition = {
 (*****************************************************************************)
 (* Similar to controlflow.ml, but with a simpler node_kind.
  * See controlflow.ml for more information. *)
+
+type ('a, 'b) cfg_opaque = ('a, 'b) CFG.t
+
+let pp_cfg_opaque _ _ _ _ = ()
+
 type node = {
   n : node_kind;
       (* old: there are tok in the nodes anyway
@@ -347,6 +359,13 @@ and node_kind =
   | NGoto of tok * label
   | NReturn of tok * exp
   | NThrow of tok * exp
+  | NFunc of {
+      fdef : G.function_definition;
+      cfg : (node, edge) cfg_opaque;
+      ent : G.entity;
+    }
+  | NClass of (node, edge) cfg_opaque
+  | NModule of (node, edge) cfg_opaque
   | NOther of other_stmt
   | NTodo of stmt
 [@@deriving show { with_path = false }]
@@ -354,7 +373,8 @@ and node_kind =
 (* For now there is just one kind of edge.
  * (we may use more? the "ShadowNode" idea of Julia Lawall?)
  *)
-type edge = Direct
+and edge = Direct
+
 type cfg = (node, edge) CFG.t
 
 (* an int representing the index of a node in the graph *)

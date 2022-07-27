@@ -594,8 +594,8 @@ and expr_aux env ?(void = false) e_gen =
       (* TODO: we should have a use def.f_tok *)
       let tok = G.fake "lambda" in
       let lval = fresh_lval env tok in
-      let fdef = function_definition env fdef in
-      add_instr env (mk_i (AssignAnon (lval, Lambda fdef)) eorig);
+      let fdef2 = function_definition_helper env fdef in
+      add_instr env (mk_i (AssignAnon (lval, Lambda (fdef, fdef2))) eorig);
       mk_e (Fetch lval) eorig
   | G.AnonClass def ->
       (* TODO: should use def.ckind *)
@@ -1011,6 +1011,12 @@ and mk_switch_break_label env tok =
   in
   (break_label, [ mk_s (Label break_label) ], switch_env)
 
+(* TODO: non module structs *)
+and module_stmt env = function
+  | G.ModuleAlias _ -> []
+  | ModuleStruct (_, stmts) -> List.concat_map (stmt env) stmts
+  | OtherModule _ -> []
+
 and stmt_aux env st =
   match st.G.s with
   | G.ExprStmt (eorig, tok) ->
@@ -1023,6 +1029,14 @@ and stmt_aux env st =
       let ss, e' = expr_with_pre_stmts env e in
       let lv = lval_of_ent env ent in
       ss @ [ mk_s (Instr (mk_i (Assign (lv, e')) (Related (G.S st)))) ]
+  | G.DefStmt (ent, G.FuncDef fdef) ->
+      let _, body = function_definition env.lang fdef in
+      [ mk_s (FuncStmt { ent; fdef; body }) ]
+  | G.DefStmt (_, G.ClassDef { cbody = _, fields, _; _ }) ->
+      (* TODO: deal with class parameters *)
+      [ mk_s (ClassStmt (List.concat_map (fun (G.F s) -> stmt env s) fields)) ]
+  | G.DefStmt (_, G.ModuleDef m) ->
+      [ mk_s (ModuleStmt (module_stmt env m.mbody)) ]
   | G.DefStmt def -> [ mk_s (MiscStmt (DefStmt def)) ]
   | G.DirectiveStmt dir -> [ mk_s (MiscStmt (DirectiveStmt dir)) ]
   | G.Block xs -> xs |> G.unbracket |> Common.map (stmt env) |> List.flatten
@@ -1462,7 +1476,7 @@ and python_with_stmt env manager opt_pat body =
 (* Defs *)
 (*****************************************************************************)
 
-and function_definition env fdef =
+and function_definition_helper env fdef =
   let fparams = parameters env fdef.G.fparams in
   let fbody = function_body env fdef.G.fbody in
   { fparams; frettype = fdef.G.frettype; fbody }
@@ -1471,7 +1485,7 @@ and function_definition env fdef =
 (* Entry points *)
 (*****************************************************************************)
 
-let function_definition lang def =
+and function_definition lang def =
   let env = empty_env lang in
   let params = parameters env def.G.fparams in
   let body = function_body env def.G.fbody in
