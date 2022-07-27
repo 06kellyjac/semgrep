@@ -47,6 +47,9 @@ let short_string_of_node_kind nkind =
             (IL.show_call_special call_special)
       | FixmeInstr _ -> "<fix-me instr>")
   | NTodo _ -> "<to-do stmt>"
+  | NFunc _ -> "<func>"
+  | NClass _ -> "<class>"
+  | NModule _ -> "<module>"
 
 (* using internally graphviz dot and ghostview on X11 *)
 let (display_cfg : cfg -> unit) =

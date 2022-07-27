@@ -379,7 +379,7 @@ let pm_of_finding finding =
   | T.ArgToReturn _ ->
       None
 
-let check_fundef lang fun_env taint_config opt_ent fdef =
+let _check_fundef lang fun_env taint_config opt_ent fdef =
   let name =
     let* ent = opt_ent in
     let* name = AST_to_IL.name_of_entity ent in
@@ -433,7 +433,7 @@ let check_fundef lang fun_env taint_config opt_ent fdef =
       Dataflow_core.VarMap.empty fdef.G.fparams
   in
   let _, xs = AST_to_IL.function_definition lang fdef in
-  let flow = CFG_build.cfg_of_stmts xs in
+  let flow = CFG_build.cfg_of_stmts lang xs in
   Dataflow_tainting.fixpoint ~in_env ?name ~fun_env taint_config flow |> ignore
 
 let check_rule rule match_hook (default_config, equivs) xtarget =
@@ -463,6 +463,7 @@ let check_rule rule match_hook (default_config, equivs) xtarget =
 
   let fun_env = Hashtbl.create 8 in
 
+  (*
   let v =
     V.mk_visitor
       {
@@ -484,6 +485,7 @@ let check_rule rule match_hook (default_config, equivs) xtarget =
   in
   (* Check each function definition. *)
   v (G.Pr ast);
+  *)
   (* Check the top-level statements.
    * In scripting languages it is not unusual to write code outside
    * function declarations and we want to check this too. We simply
@@ -491,7 +493,7 @@ let check_rule rule match_hook (default_config, equivs) xtarget =
   let (), match_time =
     Common.with_time (fun () ->
         let xs = AST_to_IL.stmt lang (G.stmt1 ast) in
-        let flow = CFG_build.cfg_of_stmts xs in
+        let flow = CFG_build.cfg_of_stmts lang xs in
         Dataflow_tainting.fixpoint ~fun_env taint_config flow |> ignore)
   in
 
