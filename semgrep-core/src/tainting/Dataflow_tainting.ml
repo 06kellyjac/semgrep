@@ -41,7 +41,7 @@ let logger = Logging.get_logger [ __MODULE__ ]
 
 let ( let* ) = Option.bind
 
-module DataflowX = Dataflow_core.Make (struct
+module DataflowX = Dataflow_prog.Make (struct
   type node = F.node
   type edge = F.edge
   type flow = (node, edge) CFG.t
@@ -540,7 +540,7 @@ let check_tainted_return env tok e : Taints.t * var_env =
 (* Transfer *)
 (*****************************************************************************)
 
-let input_env ~enter_env ~(flow : F.cfg) mapping ni =
+let input_env enter_env (flow : IL.cfg) mapping ni _config =
   let node = flow.graph#nodes#assoc ni in
   match node.F.n with
   | Enter -> enter_env
@@ -554,18 +554,87 @@ let input_env ~enter_env ~(flow : F.cfg) mapping ni =
       | [ penv ] -> penv
       | penv1 :: penvs -> List.fold_left union_vars penv1 penvs)
 
+(* modify_env resets the environment for "temporally distinct" pieces of code,
+   i.e. anything that can run later.
+   For lambdas and functions, we have to start with a blank environment,
+   as we don't know what has changed in the meantime.
+*)
+let modify_env env node taint_config =
+  match node.n with
+  | NFunc { fdef; _ }
+  | NInstr { i = AssignAnon (_, Lambda (fdef, _)); _ } ->
+      let init_env =
+        match node.n with
+        | NFunc _ -> VarMap.empty
+        | _ -> env
+      in
+      let add_to_env env id ii =
+        let var = str_of_name (AST_to_IL.var_of_id_info id ii) in
+        let taint =
+          taint_config.is_source (G.Tk (snd id))
+          |> Common.map fst |> T.taints_of_pms
+        in
+        Dataflow_core.VarMap.add var taint env
+      in
+      (* For each argument, check if it's a source and, if so, add it to the input
+         * environment. *)
+      List.fold_left
+        (fun env par ->
+          match par with
+          | G.Param { pname = Some id; pinfo; _ } -> add_to_env env id pinfo
+          (* JS: {arg} : type *)
+          | G.ParamPattern
+              (G.OtherPat
+                ( ("ExprToPattern", _),
+                  [
+                    G.E
+                      {
+                        e = G.Cast (_, _, { e = G.Record (_, fields, _); _ });
+                        _;
+                      };
+                  ] ))
+          (* JS: {arg} *)
+          | G.ParamPattern
+              (G.OtherPat
+                ( ("ExprToPattern", _),
+                  [ G.E { e = G.Record (_, fields, _); _ } ] )) ->
+              List.fold_left
+                (fun env field ->
+                  match field with
+                  | G.F
+                      {
+                        s =
+                          G.DefStmt
+                            ( _,
+                              G.FieldDefColon
+                                {
+                                  vinit = Some { e = G.N (G.Id (id, ii)); _ };
+                                  _;
+                                } );
+                        _;
+                      } ->
+                      add_to_env env id ii
+                  | _ -> env)
+                env fields
+          | _ -> env)
+        init_env fdef.G.fparams
+  | NClass _ ->
+      (* TODO: add class parameters here *)
+      env
+  | _ -> env
+
 let (transfer :
       config ->
       fun_env ->
-      Taints.t Dataflow_core.env ->
       string option ->
-      flow:F.cfg ->
+      IL.cfg ->
+      Taints.t Dataflow_core.env ->
       Taints.t Dataflow_core.transfn) =
- fun config fun_env enter_env opt_name ~flow
+ fun config fun_env opt_name flow env
      (* the transfer function to update the mapping at node index ni *)
-       mapping ni ->
+       _mapping ni ->
   (* DataflowX.display_mapping flow mapping show_tainted; *)
-  let in' : Taints.t VarMap.t = input_env ~enter_env ~flow mapping ni in
+  let in' = env in
   let node = flow.graph#nodes#assoc ni in
   let out' : Taints.t VarMap.t =
     let env = { config; fun_name = opt_name; fun_env; var_env = in' } in
@@ -625,7 +694,7 @@ let (fixpoint :
       ?name:Dataflow_core.var ->
       ?fun_env:fun_env ->
       config ->
-      F.cfg ->
+      IL.cfg ->
       mapping) =
  fun ?in_env ?name:opt_name ?(fun_env = Hashtbl.create 1) config flow ->
   let init_mapping =
@@ -638,7 +707,7 @@ let (fixpoint :
   in
   (* THINK: Why I cannot just update mapping here ? if I do, the mapping gets overwritten later on! *)
   (* DataflowX.display_mapping flow init_mapping show_tainted; *)
-  DataflowX.fixpoint ~eq:Taints.equal ~init:init_mapping
-    ~trans:(transfer config fun_env enter_env opt_name ~flow)
-      (* tainting is a forward analysis! *)
-    ~forward:true ~flow
+  DataflowX.fixpoint ~enter_env ~eq:Taints.equal ~init:init_mapping
+    ~trans:(transfer config fun_env) ~flow
+    ~forward:true (* tainting is a forward analysis! *)
+    ~meet:input_env ~modify_env ~config ~name:opt_name ~conclude:(fun _ _ -> ())

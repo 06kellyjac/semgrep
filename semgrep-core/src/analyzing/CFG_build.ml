@@ -44,6 +44,8 @@ type label_key = string * G.sid
  *)
 type state = {
   g : (F.node, F.edge) Ograph_extended.ograph_mutable;
+  (* We keep this so we can connect to unreachable nodes. *)
+  enteri : F.nodei;
   (* When there is a 'return' we need to know the exit node to link to *)
   exiti : F.nodei;
   (* Attaches labels to nodes. *)
@@ -127,8 +129,9 @@ type cfg_stmt_result =
    *)
   | CfgFirstLast of F.nodei * F.nodei option
 
-let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
- fun state previ stmt ->
+let rec cfg_stmt : Lang.t -> state -> F.nodei option -> stmt -> cfg_stmt_result
+    =
+ fun lang state previ stmt ->
   match stmt.s with
   | Instr x -> (
       let newi = state.g#add_node { F.n = F.NInstr x } in
@@ -144,7 +147,7 @@ let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
            * may (or may not) raise exceptions. *)
           state.g |> add_arc_opt_to_opt (Some newi, state.try_catches_opt);
           CfgFirstLast (newi, Some newi)
-      | AssignAnon (_, Lambda fdef) ->
+      | AssignAnon (_, Lambda (_, fdef)) ->
           (* Lambdas are treated as statement blocks, kind of like IF-THEN blocks,
            * the CFG does NOT capture the actual flow of data that goes into the
            * lambda through its parameters, and back into the surrounding definition
@@ -158,7 +161,9 @@ let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
            *)
           let lasti = state.g#add_node { F.n = F.Join } in
           let finallambda =
-            cfg_stmt_list { state with exiti = lasti } (Some newi) fdef.fbody
+            cfg_stmt_list lang
+              { state with exiti = lasti }
+              (Some newi) fdef.fbody
           in
           state.g |> add_arc (newi, lasti);
           state.g |> add_arc_from_opt (finallambda, lasti);
@@ -179,8 +184,8 @@ let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
       state.g |> add_arc (newi, newfakethen);
       state.g |> add_arc (newi, newfakeelse);
 
-      let finalthen = cfg_stmt_list state (Some newfakethen) st1 in
-      let finalelse = cfg_stmt_list state (Some newfakeelse) st2 in
+      let finalthen = cfg_stmt_list lang state (Some newfakethen) st1 in
+      let finalelse = cfg_stmt_list lang state (Some newfakeelse) st2 in
 
       match (finalthen, finalelse) with
       | None, None ->
@@ -207,7 +212,7 @@ let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
       state.g |> add_arc (newi, newfakethen);
       state.g |> add_arc (newi, newfakeelse);
 
-      let finalthen = cfg_stmt_list state (Some newfakethen) st in
+      let finalthen = cfg_stmt_list lang state (Some newfakethen) st in
       state.g |> add_arc_from_opt (finalthen, newi);
       CfgFirstLast (newi, Some newfakeelse)
   | Label label -> CfgLabel label
@@ -234,15 +239,19 @@ let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
       state.g |> add_arc_from_opt (previ, newi);
       let catchesi = state.g#add_node { F.n = NOther (Noop "catch") } in
       let state' = { state with try_catches_opt = Some catchesi } in
-      let finaltry = cfg_stmt_list state' (Some newi) try_st in
+      let finaltry = cfg_stmt_list lang state' (Some newi) try_st in
       state.g |> add_arc_from_opt (finaltry, catchesi);
       let newfakefinally = state.g#add_node { F.n = NOther (Noop "finally") } in
       state.g |> add_arc (catchesi, newfakefinally);
       catches
       |> List.iter (fun (_, catch_st) ->
-             let finalcatch = cfg_stmt_list state (Some catchesi) catch_st in
+             let finalcatch =
+               cfg_stmt_list lang state (Some catchesi) catch_st
+             in
              state.g |> add_arc_from_opt (finalcatch, newfakefinally));
-      let finalfinally = cfg_stmt_list state (Some newfakefinally) finally_st in
+      let finalfinally =
+        cfg_stmt_list lang state (Some newfakefinally) finally_st
+      in
       (* If we're inside another Try then we assume that we could propagate up
        * some unhandled exception. Otherwise we assume that we handled everything.
        * THINK: Alternatively, we could add an arc to the exit node. *)
@@ -255,6 +264,29 @@ let rec cfg_stmt : state -> F.nodei option -> stmt -> cfg_stmt_result =
       | None -> state.g |> add_arc (newi, state.exiti)
       | Some catchesi -> state.g |> add_arc (newi, catchesi));
       CfgFirstLast (newi, None)
+  (* Any DefStmts which are FuncDefs are reified as proper Func nodes
+     within the CFG, which contain their own smaller CFGs.
+  *)
+  | FuncStmt { fdef; ent; body } -> (
+      let cfg = cfg_of_stmts lang body in
+      let newi = state.g#add_node { F.n = NFunc { fdef; cfg; ent } } in
+      match previ with
+      | None ->
+          state.g |> add_arc (state.enteri, newi);
+          CfgFirstLast (newi, Some newi)
+      | _ ->
+          state.g |> add_arc_from_opt (previ, newi);
+          CfgFirstLast (newi, Some newi))
+  | ClassStmt stmts ->
+      let cfg = cfg_of_stmts lang stmts in
+      let newi = state.g#add_node { F.n = NClass cfg } in
+      state.g |> add_arc_from_opt (previ, newi);
+      CfgFirstLast (newi, Some newi)
+  | ModuleStmt stmts ->
+      let cfg = cfg_of_stmts lang stmts in
+      let newi = state.g#add_node { F.n = NModule cfg } in
+      state.g |> add_arc_from_opt (previ, newi);
+      CfgFirstLast (newi, Some newi)
   | MiscStmt x ->
       let newi = state.g#add_node { F.n = F.NOther x } in
       state.g |> add_arc_from_opt (previ, newi);
@@ -266,7 +298,7 @@ and cfg_todo state previ stmt =
   state.g |> add_arc_from_opt (previ, newi);
   CfgFirstLast (newi, Some newi)
 
-and cfg_stmt_list state previ xs =
+and cfg_stmt_list lang state previ xs =
   let lasti_opt, labels =
     xs
     |> List.fold_left
@@ -274,7 +306,7 @@ and cfg_stmt_list state previ xs =
            (* We don't create special nodes for labels in the CFG; instead,
             * we assign them to the entry nodes of the labeled statements.
             *)
-           match cfg_stmt state previ stmt with
+           match cfg_stmt lang state previ stmt with
            | CfgFirstLast (firsti, lasti) ->
                label_node state labels firsti;
                (lasti, [])
@@ -307,8 +339,8 @@ and cfg_stmt_list state previ xs =
 (* Main entry point *)
 (*****************************************************************************)
 
-let (cfg_of_stmts : stmt list -> F.cfg) =
- fun xs ->
+and (cfg_of_stmts : Lang.t -> stmt list -> F.cfg) =
+ fun lang xs ->
   (* yes, I sometimes use objects, and even mutable objects in OCaml ... *)
   let g = new Ograph_extended.ograph_mutable in
 
@@ -320,13 +352,14 @@ let (cfg_of_stmts : stmt list -> F.cfg) =
   let state =
     {
       g;
+      enteri;
       exiti;
       labels = Hashtbl.create 2;
       gotos = ref [];
       try_catches_opt = None;
     }
   in
-  let last_node_opt = cfg_stmt_list state (Some newi) xs in
+  let last_node_opt = cfg_stmt_list lang state (Some newi) xs in
   (* Must wait until all nodes have been labeled before resolving gotos. *)
   resolve_gotos state;
   (* maybe the body does not contain a single 'return', so by default

@@ -26,7 +26,7 @@ let pr2_ranges file rwms =
 
 let test_tainting lang file config def =
   let xs = AST_to_IL.stmt lang (H.funcbody_to_stmt def.fbody) in
-  let flow = CFG_build.cfg_of_stmts xs in
+  let flow = CFG_build.cfg_of_stmts lang xs in
 
   Common.pr2 "\nDataflow";
   Common.pr2 "--------";
